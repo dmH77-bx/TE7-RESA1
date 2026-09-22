@@ -11,6 +11,78 @@
 
 #include "common.h"
 
+// Début de la partie 1.5 avec poll() :
+
+// void echo_client(int sockfd) {
+//         char buff[MSG_LEN];
+//         int msg_size;
+
+//         struct pollfd fds[2];
+
+//         fds[0].fd = STDIN_FILENO;
+//         fds[0].events = POLLIN;
+//         fds[1].fd = sockfd;
+//         fds[1].events = POLLIN;
+
+//         while (1) {
+
+//                 fds[0].revents = 0;
+//                 fds[1].revents = 0;
+
+//                 int nbfds = poll(fds, 2, -1);
+//                 if (nbfds == -1)
+//                 {
+//                         perror("Polling");
+//                         continue;
+//                 }
+
+//                 if (fds[0].revents & POLLIN)
+//                 {
+//                         // Cleaning memory
+//                         memset(buff, 0, MSG_LEN);
+//                         // Getting message from client
+//                         printf("Message: ");
+//                         int n = 0;
+//                         while (n < MSG_LEN - 1 && (buff[n++] = getchar()) != '\n') {} // trailing '\n' will be sent
+//                         buff[n] = '\0';
+//                         msg_size = strlen(buff);
+//                         // Sending message size
+//                         if (send(sockfd, &msg_size, sizeof(msg_size), 0) <= 0) {
+//                                 break;
+//                         }
+//                         printf("Message size sent (%d)!\n", msg_size);
+
+//                         // Sending message (ECHO)
+//                         if (send(sockfd, buff, msg_size, 0) <= 0) {
+//                                 break;
+//                         }
+//                         printf("Message sent!\n");
+//                 }
+//                 if (fds[1].revents & POLLIN)
+//                 {
+//                         // Cleaning memory
+//                         memset(buff, 0, MSG_LEN);
+//                         msg_size = 0;
+//                         // Received message size
+//                         if (recv(sockfd, &msg_size, sizeof(msg_size), 0) <= 0) {
+//                                 break;
+//                         }
+//                         if (msg_size <= 0 || msg_size >= MSG_LEN) {
+//                                 fprintf(stderr, "Invalid message size received\n");
+//                                 break;
+//                         }
+//                         printf("Received size: %d\n", msg_size);
+//                         // Receiving message
+//                         if (recv(sockfd, buff, msg_size, 0) <= 0) {
+//                                 break;
+//                         }
+//                         printf("Received: %s", buff);
+//                 }
+//         }
+// }
+
+
+
 void echo_client(int sockfd) {
 	char buff[MSG_LEN];
 	int msg_size;
