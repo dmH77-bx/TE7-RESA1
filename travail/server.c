@@ -16,16 +16,27 @@
 
 int echo_server(int sockfd) {
 	char buff[MSG_LEN];
-	
+	int msg_size;
 	// Cleaning memory
 	memset(buff, 0, MSG_LEN);
+	// Receivig message size
+	if (recv(sockfd, &msg_size, sizeof(msg_size), 0) <= 0) {
+	    return 0;
+	}
+	printf("Received message size: %d\n", msg_size);
 	// Receiving message
-	if (recv(sockfd, buff, MSG_LEN, 0) <= 0) {
+	if (recv(sockfd, buff, msg_size, 0) <= 0) {
 	    return 0;
 	}
 	printf("Received: %s", buff);
+
+	// Sending message size
+	if (send(sockfd, &msg_size, sizeof(msg_size), 0) <= 0) {
+		return 0;
+	}
+	printf("Size sent (%d)!\n", msg_size);
 	// Sending message (ECHO)
-	if (send(sockfd, buff, strlen(buff), 0) <= 0) {
+	if (send(sockfd, buff, msg_size, 0) <= 0) {
 		return 0;
 	}
 	printf("Message sent!\n");

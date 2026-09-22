@@ -13,6 +13,7 @@
 
 void echo_client(int sockfd) {
 	char buff[MSG_LEN];
+	int msg_size;
 	int n;
 	while (1) {
 		// Cleaning memory
@@ -21,15 +22,28 @@ void echo_client(int sockfd) {
 		printf("Message: ");
 		n = 0;
 		while ((buff[n++] = getchar()) != '\n') {} // trailing '\n' will be sent
+		msg_size = strlen(buff);
+		// Sending message size
+		if (send(sockfd, &msg_size, sizeof(msg_size), 0) <= 0) {
+			break;
+		}
+		printf("Message size sent (%d)!\n", msg_size);
+
 		// Sending message (ECHO)
-		if (send(sockfd, buff, strlen(buff), 0) <= 0) {
+		if (send(sockfd, buff, msg_size, 0) <= 0) {
 			break;
 		}
 		printf("Message sent!\n");
 		// Cleaning memory
 		memset(buff, 0, MSG_LEN);
+		msg_size = 0;
+		// Received message size
+		if (recv(sockfd, &msg_size, sizeof(msg_size), 0) <= 0) {
+	    	break;
+		}
+		printf("Received size: %d\n", msg_size);
 		// Receiving message
-		if (recv(sockfd, buff, MSG_LEN, 0) <= 0) {
+		if (recv(sockfd, buff, msg_size, 0) <= 0) {
 			break;
 		}
 		printf("Received: %s", buff);
