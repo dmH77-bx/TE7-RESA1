@@ -1,166 +1,194 @@
-#define _GNU_SOURCE
+#define _DEFAULT_SOURCE
+#include "msg_struct.h"
+#include "common.h"
+
+
 #include <arpa/inet.h>
-#include <netdb.h>
 #include <netinet/in.h>
+#include <netdb.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <sys/types.h>
 #include <unistd.h>
 
-#include "common.h"
-
-// Début de la partie 1.5 avec poll() :
-
-// void echo_client(int sockfd) {
-//         char buff[MSG_LEN];
-//         int msg_size;
-
-//         struct pollfd fds[2];
-
-//         fds[0].fd = STDIN_FILENO;
-//         fds[0].events = POLLIN;
-//         fds[1].fd = sockfd;
-//         fds[1].events = POLLIN;
-
-//         while (1) {
-
-//                 fds[0].revents = 0;
-//                 fds[1].revents = 0;
-
-//                 int nbfds = poll(fds, 2, -1);
-//                 if (nbfds == -1)
-//                 {
-//                         perror("Polling");
-//                         continue;
-//                 }
-
-//                 if (fds[0].revents & POLLIN)
-//                 {
-//                         // Cleaning memory
-//                         memset(buff, 0, MSG_LEN);
-//                         // Getting message from client
-//                         printf("Message: ");
-//                         int n = 0;
-//                         while (n < MSG_LEN - 1 && (buff[n++] = getchar()) != '\n') {} // trailing '\n' will be sent
-//                         buff[n] = '\0';
-//                         msg_size = strlen(buff);
-//                         // Sending message size
-//                         if (send(sockfd, &msg_size, sizeof(msg_size), 0) <= 0) {
-//                                 break;
-//                         }
-//                         printf("Message size sent (%d)!\n", msg_size);
-
-//                         // Sending message (ECHO)
-//                         if (send(sockfd, buff, msg_size, 0) <= 0) {
-//                                 break;
-//                         }
-//                         printf("Message sent!\n");
-//                 }
-//                 if (fds[1].revents & POLLIN)
-//                 {
-//                         // Cleaning memory
-//                         memset(buff, 0, MSG_LEN);
-//                         msg_size = 0;
-//                         // Received message size
-//                         if (recv(sockfd, &msg_size, sizeof(msg_size), 0) <= 0) {
-//                                 break;
-//                         }
-//                         if (msg_size <= 0 || msg_size >= MSG_LEN) {
-//                                 fprintf(stderr, "Invalid message size received\n");
-//                                 break;
-//                         }
-//                         printf("Received size: %d\n", msg_size);
-//                         // Receiving message
-//                         if (recv(sockfd, buff, msg_size, 0) <= 0) {
-//                                 break;
-//                         }
-//                         printf("Received: %s", buff);
-//                 }
-//         }
-// }
+#define NI_MAXHOST 1025
+#define NI_MAXSERV 32
+#define MAX_LINE_SIZE 4324
 
 
-
-void echo_client(int sockfd) {
-	char buff[MSG_LEN];
-	int msg_size;
-	int n;
-	while (1) {
-		// Cleaning memory
-		memset(buff, 0, MSG_LEN);
-		// Getting message from client
-		printf("Message: ");
-		n = 0;
-		while ((buff[n++] = getchar()) != '\n') {} // trailing '\n' will be sent
-		msg_size = strlen(buff);
-		// Sending message size
-		if (send(sockfd, &msg_size, sizeof(msg_size), 0) <= 0) {
-			break;
-		}
-		printf("Message size sent (%d)!\n", msg_size);
-
-		// Sending message (ECHO)
-		if (send(sockfd, buff, msg_size, 0) <= 0) {
-			break;
-		}
-		printf("Message sent!\n");
-		// Cleaning memory
-		memset(buff, 0, MSG_LEN);
-		msg_size = 0;
-		// Received message size
-		if (recv(sockfd, &msg_size, sizeof(msg_size), 0) <= 0) {
-	    	break;
-		}
-		printf("Received size: %d\n", msg_size);
-		// Receiving message
-		if (recv(sockfd, buff, msg_size, 0) <= 0) {
-			break;
-		}
-		printf("Received: %s", buff);
-	}
-}
-
-int handle_connect(char *addr, char *port) {
+int setup_connection(const char *server_ip, const char *server_port) {
 	struct addrinfo hints, *result, *rp;
-	int sfd;
+	int socket_fd;
+	char host[NI_MAXHOST]; // gameinfo will stock the IP@ in host
+	char port[NI_MAXSERV]; // gameinfo will stock the port# in port
+
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
-	if (getaddrinfo(addr, port, &hints, &result) != 0) {
+	int error = getaddrinfo(server_ip, server_port, &hints, &result); // This function creates a linked list
+	if (error != 0) {
 		perror("getaddrinfo()");
 		exit(EXIT_FAILURE);
 	}
+
+	printf("Using server IP address %s.\n", server_ip);
+
 	for (rp = result; rp != NULL; rp = rp->ai_next) {
-		sfd = socket(rp->ai_family, rp->ai_socktype,rp->ai_protocol);
-		if (sfd == -1) {
+		socket_fd = socket(rp->ai_family, rp->ai_socktype,rp->ai_protocol);
+		if (socket_fd == -1) {
 			continue;
 		}
-		if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1) {
+		if (connect(socket_fd, rp->ai_addr, rp->ai_addrlen) != -1) {
 			break;
 		}
-		close(sfd);
+		close(socket_fd);
 	}
 	if (rp == NULL) {
 		fprintf(stderr, "Could not connect\n");
+		freeaddrinfo(result);
 		exit(EXIT_FAILURE);
 	}
+
+	getnameinfo(rp->ai_addr, rp->ai_addrlen, host, sizeof(host), port, sizeof(port), NI_NUMERICHOST | NI_NUMERICSERV);
 	freeaddrinfo(result);
-	return sfd;
+	printf("TCP socket created.\n");
+
+	printf("Connected to %s:%s.\n", host, port);
+	return socket_fd;
 }
 
-int main(int argc, char *argv[]) {
-	if (argc != 3)
-	{
-		printf("%s: <server_name> <server_port>\n", argv[0]);
-		exit(EXIT_FAILURE);
+
+// Return 1 to keep running, or 0 if the server disconnects or sends an invalid message
+int read_server_message(int socket_fd) {
+	struct message message;
+	char payload[MAX_PAYLOAD_SIZE + 1];
+
+	if (receive_structure_and_payload(socket_fd, &message, payload, MAX_PAYLOAD_SIZE) == 0) {
+		return 0;
 	}
 
-	int sfd;
-	sfd = handle_connect(argv[1], argv[2]);
-	echo_client(sfd);
-	close(sfd);
+	switch (message.type) {
+		case ECHO_SEND:
+			fprintf(stdout, "%s\n", payload);
+			break;
+		case NICKNAME_NEW:
+			fprintf(stdout, "[Server] : %s\n", payload);
+			break;
+		default:
+			fprintf(stderr, "Invalid message type: %s\n", msg_type_str[message.type]);
+			break;
+	}
+
+	return 1;
+}
+
+// Return 1 to keep running, or 0 when stdin closes or the user quits
+int get_and_send_user_message(int socket_fd) {
+	struct message message = {0};
+	char *payload;
+	ssize_t bytes_read;
+	char msg_line[MAX_LINE_SIZE + 1];
+	char *pseudo;
+
+	bytes_read = read(STDIN_FILENO, msg_line, MAX_LINE_SIZE);
+	die((int)bytes_read, "read stdin");
+	if (bytes_read == 0) {
+		return 0;
+	}
+
+	if (msg_line[bytes_read - 1] == '\n') {
+		bytes_read--;
+	}
+
+	msg_line[bytes_read] = '\0';
+	if (strncmp(msg_line, "/nick ", 6) == 0) {
+		pseudo = msg_line + 6; // To get the pseudo
+		// while (*pseudo == ' ') {
+		// 	pseudo++;
+		// }
+		// if (*pseudo == '\0') {
+		// 	fprintf(stderr, "Nickname missing\n");
+		// 	return 1;
+		// }
+
+		if (valid_nickname(pseudo, NICK_LEN - 1) == 0) {
+			fprintf(stderr, "%s: Invalid nickname\n", msg_type_str[NICKNAME_NEW]);
+			return 1; // To refuse the nickname but keep the client connected
+		}
+
+		message.type = NICKNAME_NEW;
+		strcpy(message.infos, pseudo);
+		message.pld_len = 0;
+		return send_structure_and_payload(socket_fd, &message, NULL);
+	}
+
+	if (strcmp(msg_line, "/nick") == 0) {
+		fprintf(stderr, "Nickname missing\n");
+		return 1;
+	}
+
+	if (strcmp(msg_line, "/quit") == 0) {
+		return 0;
+	}
+
+	payload = msg_line;
+	if (strlen(payload) > MAX_PAYLOAD_SIZE) {
+		fprintf(stderr, "Payload too long: %d\n", (int)strlen(payload));
+		return 1; // To refuse the message but keep the client connected
+	}
+	message.pld_len = (int)strlen(payload);
+	message.type = ECHO_SEND;
+
+	if (send_structure_and_payload(socket_fd, &message, payload) == 0) {
+		return 0;
+	}
+
+	return 1;
+}
+
+
+void client_poll_loop(int socket_fd) {
+	struct pollfd watched[2];
+	int running = 1;
+
+	/* Initialize once; poll() fills revents after each call. */
+	watched[0].fd = STDIN_FILENO;
+	watched[0].events = POLLIN;
+	watched[1].fd = socket_fd;
+	watched[1].events = POLLIN;
+
+	while (running) {
+		int ready = poll(watched, 2, -1);
+		die(ready, "poll");
+
+		if ((watched[1].revents & POLLIN) != 0) {
+			running = read_server_message(socket_fd);
+		}
+
+		if (running && (watched[0].revents & POLLIN) != 0) {
+			running = get_and_send_user_message(socket_fd);
+		}
+
+		if ((watched[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 || (watched[1].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+			running = 0;
+		}
+	}
+}
+
+int main(int argc, char **argv) {
+	int socket_fd;
+
+	if (argc != 3) {
+		fprintf(stderr, "Usage: ./client <server_ip@> <server_port>\n");
+		return EXIT_FAILURE;
+	}
+	socket_fd = setup_connection(argv[1], argv[2]);
+	if (socket_fd < 0) {
+		return EXIT_FAILURE;
+	}
+	client_poll_loop(socket_fd);
+	close(socket_fd);
 	return EXIT_SUCCESS;
 }
-

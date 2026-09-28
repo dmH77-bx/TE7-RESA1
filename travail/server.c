@@ -1,160 +1,218 @@
-#define _GNU_SOURCE
+#define _DEFAULT_SOURCE
+#include "msg_struct.h"
+#include "common.h"
+#include "client_list.h"
+
+
 #include <arpa/inet.h>
-#include <netdb.h>
 #include <netinet/in.h>
+#include <netdb.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <sys/types.h>
 #include <unistd.h>
-#include <poll.h>
 
-#define FD_TAB_SIZE 128
+#define MAX_CLIENTS 128
+#define NI_MAXHOST 1025
+#define NI_MAXSERV 32
 
-#include "common.h"
 
-int echo_server(int sockfd) {
-	char buff[MSG_LEN];
-	int msg_size;
-	// Cleaning memory
-	memset(buff, 0, MSG_LEN);
-	// Receivig message size
-	if (recv(sockfd, &msg_size, sizeof(msg_size), 0) <= 0) {
-	    return 0;
-	}
-	printf("Received message size: %d\n", msg_size);
-	// Receiving message
-	if (recv(sockfd, buff, msg_size, 0) <= 0) {
-	    return 0;
-	}
-	printf("Received: %s", buff);
-
-	// Sending message size
-	if (send(sockfd, &msg_size, sizeof(msg_size), 0) <= 0) {
-		return 0;
-	}
-	printf("Size sent (%d)!\n", msg_size);
-	// Sending message (ECHO)
-	if (send(sockfd, buff, msg_size, 0) <= 0) {
-		return 0;
-	}
-	printf("Message sent!\n");
-    return 1;
-}
-
-int handle_bind(char *port) {
+int setup_listening_socket(const char *port) {
+	int listen_fd;
+	int ret_value;
 	struct addrinfo hints, *result, *rp;
-	int sfd;
+
 	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_UNSPEC;
+	hints.ai_family = AF_INET6;
 	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_flags = AI_PASSIVE;
-	if (getaddrinfo(NULL, port, &hints, &result) != 0) {
+	hints.ai_flags = AI_PASSIVE; // To listen on all interfaces
+	int error = getaddrinfo(NULL, port, &hints, &result);
+	if (error != 0) {
 		perror("getaddrinfo()");
 		exit(EXIT_FAILURE);
 	}
 	for (rp = result; rp != NULL; rp = rp->ai_next) {
-		sfd = socket(rp->ai_family, rp->ai_socktype,
+		listen_fd = socket(rp->ai_family, rp->ai_socktype,
 		rp->ai_protocol);
-		if (sfd == -1) {
+		if (listen_fd == -1) {
 			continue;
 		}
-		if (bind(sfd, rp->ai_addr, rp->ai_addrlen) == 0) {
+
+		int opt = 1; // 1 to activate the option
+		setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+		if (bind(listen_fd, rp->ai_addr, rp->ai_addrlen) == 0) {
 			break;
 		}
-		close(sfd);
+		close(listen_fd);
 	}
 	if (rp == NULL) {
 		fprintf(stderr, "Could not bind\n");
+		freeaddrinfo(result);
 		exit(EXIT_FAILURE);
 	}
 	freeaddrinfo(result);
-	return sfd;
+	printf("TCP listening socket created.\n");
+	printf("Socket bound to port %d.\n", atoi(port));
+
+	ret_value = listen(listen_fd, 20);
+	die(ret_value, "listen");
+	printf("Listening for client connections.\n");
+	return listen_fd;
 }
 
-int main(int argc, char *argv[]) {
+void accept_and_insert_client(int listen_fd, struct pollfd poll_fds[MAX_CLIENTS], struct client_info **clients) {
+	struct sockaddr_storage client_address;
+	socklen_t client_address_length = sizeof(client_address);
+	char host[NI_MAXHOST];
+	char port[NI_MAXSERV];
 
-	if (argc != 2)
+	int client_fd = accept(listen_fd, (struct sockaddr *)&client_address, &client_address_length);
+	die(client_fd, "accept");
+	getnameinfo((struct sockaddr *)&client_address, client_address_length, host, sizeof(host), port, sizeof(port), NI_NUMERICHOST | NI_NUMERICSERV);
+	// The function getnameinfo() allows implicitly to use the functions inet_ntoa() and ntohs
+	int slot;
+
+	for (slot = 1; slot < MAX_CLIENTS; slot++) {
+		if (poll_fds[slot].fd < 0) {
+			if (client_list_add(clients, client_fd, &client_address) < 0) {
+				close(client_fd);
+				die(-1, "malloc client information");
+			}
+			poll_fds[slot].fd = client_fd;
+			poll_fds[slot].events = POLLIN;
+			poll_fds[slot].revents = 0;
+			printf("Accepted client %s:%s on slot %d.\n", host, port, slot);
+			break;
+		}
+	}
+	if (slot == MAX_CLIENTS) {
+		fprintf(stderr, "Client limit reached. Closing the new connection.\n");
+		close(client_fd);
+	}
+}
+
+// Return 1 when the client should be disconnected, 0 otherwise
+int handle_client_message(struct client_info *clients, int client_fd) {
+	struct message message;
+	char payload[MAX_PAYLOAD_SIZE + 1];
+
+	if (receive_structure_and_payload(client_fd, &message, payload, MAX_PAYLOAD_SIZE) == 0) {
+		return 1;
+	}
+
+	fprintf(stdout, "Client %d [%s] infos=\"%s\"  payload=\"%s\"\n", client_fd, msg_type_str[message.type], message.infos, payload);
+
+	switch (message.type)
 	{
-		printf("%s: <server_port>\n", argv[0]);
-		exit(EXIT_FAILURE);
+		case ECHO_SEND:
+			break;
+		case NICKNAME_NEW:
+			if (valid_nickname(message.infos, NICK_LEN - 1) == 0) {
+				strcpy(payload, "Invalid nickname");
+				message.pld_len = strlen(payload);
+				break;
+			}
+			if (nickname_exists(clients, client_fd, message.infos)) {
+				strcpy(payload, "Nickname already taken");
+				message.pld_len = strlen(payload);
+				break;
+			}
+			if (change_nickname(clients, client_fd, message.infos) == 0) {
+				strcpy(payload, "Impossible to change nickname");
+				message.pld_len = strlen(payload);
+				break;
+			}
+			strcpy(payload, "Welcome to the chat ");
+			strcat(payload, message.infos);
+			message.pld_len = strlen(payload);
+			break;
+		default:
+			return 0;
+	}
+	if (send_structure_and_payload(client_fd, &message, payload) == 0) {
+		return 1;
+	}
+	return 0;
+}
+
+void server_poll_loop(int listen_fd, struct pollfd poll_fds[MAX_CLIENTS], struct client_info **clients) {
+	int running = 1;
+
+	// Slot 0 is the listener. The other slots contain client sockets
+	for (int i = 0; i < MAX_CLIENTS; i++) {
+		poll_fds[i].fd = -1;
+		poll_fds[i].events = 0;
+		poll_fds[i].revents = 0;
+	}
+	poll_fds[0].fd = listen_fd;
+	poll_fds[0].events = POLLIN;
+
+	// execute server logic
+	while (running) {
+		int ready = poll(poll_fds, MAX_CLIENTS, -1);
+		die(ready, "poll");
+
+		if ((poll_fds[0].revents & POLLIN) != 0) {
+			accept_and_insert_client(listen_fd, poll_fds, clients);
+		}
+
+		for (int slot = 1; slot < MAX_CLIENTS; slot++) {
+			short returned_events = poll_fds[slot].revents;
+			int close_connection = 0;
+			if (poll_fds[slot].fd < 0) {
+				continue;
+			}
+
+			if ((returned_events & POLLIN) != 0) {
+				close_connection = handle_client_message(*clients, poll_fds[slot].fd);
+			}
+			if ((returned_events & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+				close_connection = 1;
+			}
+			if (close_connection) {
+				int client_fd = poll_fds[slot].fd;
+				close(client_fd);
+				client_list_remove(clients, client_fd);
+				poll_fds[slot].fd = -1;
+				poll_fds[slot].events = 0;
+				poll_fds[slot].revents = 0;
+			}
+		}
+		if ((poll_fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+			running = 0;
+		}
 	}
 
-	int sfd, connfd;
-	sfd = handle_bind(argv[1]);
-	if ((listen(sfd, SOMAXCONN)) != 0) {
-		perror("listen()\n");
-		exit(EXIT_FAILURE);
+	// Cleaning up: close all client sockets and free the client list
+	for (int slot = 1; slot < MAX_CLIENTS; slot++) {
+		if (poll_fds[slot].fd >= 0) {
+			close(poll_fds[slot].fd);
+			poll_fds[slot].fd = -1;
+		}
+	}
+	client_list_destroy(clients);
+}
+
+int main(int argc, char **argv) {
+	struct pollfd poll_fds[MAX_CLIENTS];
+	struct client_info *clients = NULL;
+	const char *port;
+	int listen_fd;
+
+	if (argc != 2) {
+		fprintf(stderr, "Usage: ./server <server_port>\n");
+		return EXIT_FAILURE;
+	}
+	port = argv[1];
+	if (atoi(port) < 1 || atoi(port) > 65535) {
+		fprintf(stderr, "Invalid port\n");
+		return EXIT_FAILURE;
 	}
 
-    struct pollfd fds[FD_TAB_SIZE];
-
-    fds[0].fd = sfd;
-    fds[0].events = POLLIN;
-    fds[0].revents = 0;
-
-    for (int i = 1; i < FD_TAB_SIZE; i++)
-    {
-        fds[i].fd = -1;
-        fds[i].events = 0;
-        fds[i].revents = 0;
-    }
-
-    while (1)
-    {
-        int nbfds = poll(fds, FD_TAB_SIZE, -1);
-        if (nbfds == -1)
-        {
-            perror("Polling");
-            continue;
-        }
-
-
-        for (int i = 0; i < FD_TAB_SIZE; i++)
-        {
-            // if activity on listening socket
-            if (i == 0 && (fds[0].revents & POLLIN))
-            {
-                fds[0].revents = 0;
-                connfd = accept(sfd, NULL, NULL);
-                if (connfd < 0)
-                {
-                    perror("Accepting");
-                    continue;
-                }
-
-                for (int j = 1; j < FD_TAB_SIZE; j++)
-                {
-                    if (fds[j].fd == -1)
-                    {
-                        fds[j].fd = connfd;
-                        fds[j].events = POLLIN;
-                        fds[j].revents = 0;
-                        break;
-                    }
-                }
-            }
-
-            // if activity on client socket
-            if (i != 0 && (fds[i].revents & POLLIN))
-            {
-                fds[i].revents = 0;
-                if (echo_server(fds[i].fd) == 0)
-                {
-                    close(fds[i].fd);
-                    fds[i].fd = -1;
-                    fds[i].events = 0;
-                    fds[i].revents = 0;
-                    printf("Connection ended\n");
-                    continue;
-                }
-
-            }
-        }
-    }
-
-	close(sfd);
+	listen_fd = setup_listening_socket(port);
+	server_poll_loop(listen_fd, poll_fds, &clients);
+	close(listen_fd);
 	return EXIT_SUCCESS;
 }
-
