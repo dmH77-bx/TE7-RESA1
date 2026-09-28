@@ -14,7 +14,7 @@ struct client_info {
 };
 
 // Return 1 if modifying the nickname is possible; 0 otherwise
-int change_nickname(struct client_info *clients, int fd, char *new_nick) {
+int set_nickname(struct client_info *clients, int fd, char *new_nick) {
 	struct client_info *cursor = clients;
 
 	if (strlen(new_nick) >= NICK_LEN) {

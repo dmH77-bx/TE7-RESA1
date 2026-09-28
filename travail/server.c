@@ -119,8 +119,8 @@ int handle_client_message(struct client_info *clients, int client_fd) {
 				message.pld_len = strlen(payload);
 				break;
 			}
-			if (change_nickname(clients, client_fd, message.infos) == 0) {
-				strcpy(payload, "Impossible to change nickname");
+			if (set_nickname(clients, client_fd, message.infos) == 0) {
+				strcpy(payload, "Impossible to change/set nickname");
 				message.pld_len = strlen(payload);
 				break;
 			}
