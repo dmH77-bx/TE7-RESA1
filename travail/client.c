@@ -61,7 +61,7 @@ int setup_connection(const char *server_ip, const char *server_port) {
 
 
 // Return 1 to keep running, or 0 if the server disconnects or sends an invalid message
-int read_server_message(int socket_fd) {
+int read_server_message(int socket_fd, char *my_nickname) {
 	struct message message;
 	char payload[MAX_PAYLOAD_SIZE + 1];
 
@@ -74,7 +74,11 @@ int read_server_message(int socket_fd) {
 			fprintf(stdout, "%s\n", payload);
 			break;
 		case NICKNAME_NEW:
+			strcpy(my_nickname, message.nick_sender);
 			fprintf(stdout, "[Server] : %s\n", payload);
+			break;
+		case NICKNAME_LIST:
+			fprintf(stdout, "[Server] : %s", payload);
 			break;
 		default:
 			fprintf(stderr, "Invalid message type: %s\n", msg_type_str[message.type]);
@@ -85,7 +89,7 @@ int read_server_message(int socket_fd) {
 }
 
 // Return 1 to keep running, or 0 when stdin closes or the user quits
-int get_and_send_user_message(int socket_fd) {
+int get_and_send_user_message(int socket_fd, char *my_nickname) {
 	struct message message = {0};
 	char *payload;
 	ssize_t bytes_read;
@@ -102,16 +106,15 @@ int get_and_send_user_message(int socket_fd) {
 		bytes_read--;
 	}
 
+	strcpy(message.nick_sender, my_nickname);
 	msg_line[bytes_read] = '\0';
+	if (strcmp(msg_line, "/who") == 0) {
+		message.pld_len = 0;
+		message.type = NICKNAME_LIST;
+		return send_structure_and_payload(socket_fd, &message, NULL);
+	}
 	if (strncmp(msg_line, "/nick ", 6) == 0) {
 		pseudo = msg_line + 6; // To get the pseudo
-		// while (*pseudo == ' ') {
-		// 	pseudo++;
-		// }
-		// if (*pseudo == '\0') {
-		// 	fprintf(stderr, "Nickname missing\n");
-		// 	return 1;
-		// }
 
 		if (valid_nickname(pseudo, NICK_LEN - 1) == 0) {
 			fprintf(stderr, "%s: Invalid nickname\n", msg_type_str[NICKNAME_NEW]);
@@ -150,6 +153,7 @@ int get_and_send_user_message(int socket_fd) {
 
 
 void client_poll_loop(int socket_fd) {
+	char my_nickname[NICK_LEN] = {0};
 	struct pollfd watched[2];
 	int running = 1;
 
@@ -164,11 +168,11 @@ void client_poll_loop(int socket_fd) {
 		die(ready, "poll");
 
 		if ((watched[1].revents & POLLIN) != 0) {
-			running = read_server_message(socket_fd);
+			running = read_server_message(socket_fd, my_nickname);
 		}
 
 		if (running && (watched[0].revents & POLLIN) != 0) {
-			running = get_and_send_user_message(socket_fd);
+			running = get_and_send_user_message(socket_fd, my_nickname);
 		}
 
 		if ((watched[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 || (watched[1].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {

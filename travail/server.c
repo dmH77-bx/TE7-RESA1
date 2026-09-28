@@ -102,34 +102,49 @@ int handle_client_message(struct client_info *clients, int client_fd) {
 		return 1;
 	}
 
-	fprintf(stdout, "Client %d [%s] infos=\"%s\"  payload=\"%s\"\n", client_fd, msg_type_str[message.type], message.infos, payload);
+	fprintf(stdout, "Client %d [%s] nick_sender=\"%s\" infos=\"%s\" payload=\"%s\"\n", client_fd, msg_type_str[message.type], message.nick_sender, message.infos, payload);
 
-	switch (message.type)
-	{
-		case ECHO_SEND:
-			break;
-		case NICKNAME_NEW:
-			if (valid_nickname(message.infos, NICK_LEN - 1) == 0) {
-				strcpy(payload, "Invalid nickname");
+	if (empty_nickname(clients, client_fd) && message.type != NICKNAME_NEW) {
+		strcpy(payload, "Please enter your nickname first");
+		message.pld_len = strlen(payload);
+		message.type = NICKNAME_NEW;
+	}
+	else {
+		switch (message.type)
+		{
+			case ECHO_SEND:
+				break;
+			case NICKNAME_NEW:
+				if (valid_nickname(message.infos, NICK_LEN - 1) == 0) {
+					strcpy(payload, "Invalid nickname");
+					message.pld_len = strlen(payload);
+					break;
+				}
+				if (nickname_exists(clients, client_fd, message.infos)) {
+					strcpy(payload, "Nickname already taken");
+					message.pld_len = strlen(payload);
+					break;
+				}
+				if (set_nickname(clients, client_fd, message.infos) == 0) {
+					strcpy(payload, "Impossible to change/set nickname");
+					message.pld_len = strlen(payload);
+					break;
+				}
+				strcpy(payload, "Welcome to the chat ");
+				strcat(payload, message.infos);
 				message.pld_len = strlen(payload);
 				break;
-			}
-			if (nickname_exists(clients, client_fd, message.infos)) {
-				strcpy(payload, "Nickname already taken");
+			case NICKNAME_LIST:
+				strcpy(payload, "Online users are\n");
+				nickname_list(clients, payload, MAX_PAYLOAD_SIZE);
 				message.pld_len = strlen(payload);
 				break;
-			}
-			if (set_nickname(clients, client_fd, message.infos) == 0) {
-				strcpy(payload, "Impossible to change/set nickname");
-				message.pld_len = strlen(payload);
-				break;
-			}
-			strcpy(payload, "Welcome to the chat ");
-			strcat(payload, message.infos);
-			message.pld_len = strlen(payload);
-			break;
-		default:
-			return 0;
+			default:
+				return 0;
+		}
+	}
+	if (message.type == NICKNAME_NEW) {
+		get_nickname(clients, client_fd, message.nick_sender);
 	}
 	if (send_structure_and_payload(client_fd, &message, payload) == 0) {
 		return 1;
