@@ -1,3 +1,4 @@
+#define _DEFAULT_SOURCE
 #include "client_list.h"
 
 #include <stdlib.h>
@@ -8,8 +9,6 @@
 #include <netdb.h>
 
 #define NICK_LEN 128
-#define NI_MAXHOST 1025
-#define NI_MAXSERV 32
 
 struct client_info {
 	int fd;
@@ -19,11 +18,11 @@ struct client_info {
 	struct client_info *next;
 };
 
-void get_address_and_port(struct client_info *clients, char *target, char *address, char *port){
+void get_address_and_port(struct client_info *clients, char *target, char *address, size_t address_len, char *port, size_t port_len){
 	struct client_info *cursor = clients;
 	while (cursor != NULL) {
 		if (strcmp(cursor->nickname, target) == 0) {
-			getnameinfo(&(cursor->address), sizeof(cursor->address), address, sizeof(address), port, sizeof(port), NI_NUMERICHOST | NI_NUMERICSERV);
+			getnameinfo((struct sockaddr *)&(cursor->address), sizeof(cursor->address), address, sizeof(address), port, sizeof(port), NI_NUMERICHOST | NI_NUMERICSERV);
 		}
 		cursor = cursor->next;
 	}

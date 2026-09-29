@@ -151,7 +151,7 @@ int handle_client_message(struct client_info *clients, int client_fd) {
 				strcat(payload, " with IP address ");
 				char address[NI_MAXHOST];
 				char port[NI_MAXSERV];
-				get_address_and_port(clients, message.infos, address, port);
+				get_address_and_port(clients, message.infos, address, sizeof(address), port, sizeof(port));
 				strcat(payload, address);
 				strcat(payload, " and port number ");
 				strcat(payload, port);
