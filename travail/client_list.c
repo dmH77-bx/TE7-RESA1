@@ -18,18 +18,18 @@ struct client_info {
 	struct client_info *next;
 };
 
-void get_address_and_port(struct client_info *clients, char *target, char *address, size_t address_len, char *port, size_t port_len){
+void get_address_and_port(struct client_info *clients, char *target, char *address, size_t address_len, char *port, size_t port_len) {
 	struct client_info *cursor = clients;
 	while (cursor != NULL) {
 		if (strcmp(cursor->nickname, target) == 0) {
-			getnameinfo((struct sockaddr *)&(cursor->address), sizeof(cursor->address), address, sizeof(address), port, sizeof(port), NI_NUMERICHOST | NI_NUMERICSERV);
+			getnameinfo((struct sockaddr *)&(cursor->address), sizeof(cursor->address), address, address_len, port, port_len, NI_NUMERICHOST | NI_NUMERICSERV);
 		}
 		cursor = cursor->next;
 	}
 }
 
 // return connection time of the targeted nickname; otherwise 0
-time_t get_time(struct client_info *clients, char *target){
+time_t get_time(struct client_info *clients, char *target) {
 	struct client_info *cursor = clients;
 	while (cursor != NULL) {
 		if (strcmp(cursor->nickname, target) == 0) {
