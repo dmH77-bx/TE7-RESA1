@@ -18,6 +18,25 @@ struct client_info {
 	struct client_info *next;
 };
 
+
+// Add the fds of clients into list excluding that of the sender and return the number of fds found
+int fd_list_without_sender(struct client_info *clients, int fd, int *list_fd, int max_size) {
+	struct client_info *cursor = clients;
+	int count = 0;
+
+	while (cursor != NULL && count < max_size) {
+			if (cursor->fd != fd) {
+				list_fd[count] = cursor->fd;
+				count++;
+			}
+		cursor = cursor->next;
+	}
+	return count;
+}
+
+
+
+// Copy address and #port into address and port
 void get_address_and_port(struct client_info *clients, char *target, char *address, size_t address_len, char *port, size_t port_len) {
 	struct client_info *cursor = clients;
 	while (cursor != NULL) {
