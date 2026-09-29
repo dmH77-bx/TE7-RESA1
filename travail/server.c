@@ -158,15 +158,13 @@ int handle_client_message(struct client_info *clients, int client_fd) {
 				strcat(payload, "\n");
 				message.pld_len= strlen(payload);
 				break;
-			case BROADCAST_SEND:
+			case BROADCAST_SEND: {
 				int list_fd[MAX_CLIENTS];
 				int len = fd_list_without_sender(clients, client_fd, list_fd, MAX_CLIENTS);
 				for (int i = 0; i < len; i++) {
-					if (send_structure_and_payload(list_fd[i], &message, payload) == 0) {
-						return 1;
-					}
+					send_structure_and_payload(list_fd[i], &message, payload);
 				}
-				break;
+				break; }
 			default:
 				return 0;
 		}

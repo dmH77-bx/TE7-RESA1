@@ -157,9 +157,13 @@ int get_and_send_user_message(int socket_fd, char *my_nickname) {
 	if (strncmp(msg_line, "/msgall ", 8) == 0) {
 		message_broad = msg_line + 8;
 		message.type = BROADCAST_SEND;
-		strcpy(payload, message_broad);
-		message.pld_len = strlen(payload);
-		return send_structure_and_payload(socket_fd, &message, NULL);
+		payload = message_broad;
+		if (strlen(payload) > MAX_PAYLOAD_SIZE) {
+            fprintf(stderr, "Payload too long\n");
+            return 1; 
+        }
+        message.pld_len = (int)strlen(payload);
+		return send_structure_and_payload(socket_fd, &message, payload);
 	}
 
 	if (strcmp(msg_line, "/quit") == 0) {
