@@ -80,6 +80,9 @@ int read_server_message(int socket_fd, char *my_nickname) {
 		case NICKNAME_LIST:
 			fprintf(stdout, "[Server] : %s", payload);
 			break;
+		case NICKNAME_INFOS:
+			fprintf(stdout, "[Server] : %s", payload);
+			break;
 		default:
 			fprintf(stderr, "Invalid message type: %s\n", msg_type_str[message.type]);
 			break;
@@ -95,6 +98,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname) {
 	ssize_t bytes_read;
 	char msg_line[MAX_LINE_SIZE + 1];
 	char *pseudo;
+	char *pseudo_target;
 
 	bytes_read = read(STDIN_FILENO, msg_line, MAX_LINE_SIZE);
 	die((int)bytes_read, "read stdin");
@@ -130,6 +134,20 @@ int get_and_send_user_message(int socket_fd, char *my_nickname) {
 	if (strcmp(msg_line, "/nick") == 0) {
 		fprintf(stderr, "Nickname missing\n");
 		return 1;
+	}
+
+	if (strncmp(msg_line, "/whois ", 7) == 0) {
+		pseudo_target = msg_line + 6; // To get the pseudo targeted
+
+		if (valid_nickname(pseudo_target, NICK_LEN - 1) == 0) {
+			fprintf(stderr, "%s: Invalid nickname\n", msg_type_str[NICKNAME_INFOS]);
+			return 1; // To refuse the nickname but keep the client connected
+		}
+
+		message.type = NICKNAME_INFOS;
+		strcpy(message.infos, pseudo_target);
+		message.pld_len = 0;
+		return send_structure_and_payload(socket_fd, &message, NULL);
 	}
 
 	if (strcmp(msg_line, "/quit") == 0) {

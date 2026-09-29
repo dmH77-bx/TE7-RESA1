@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #define NICK_LEN 128
 
@@ -10,9 +11,21 @@ struct client_info {
 	int fd;
 	char nickname[NICK_LEN];
 	struct sockaddr_storage address;
+	time_t connection_time;
 	struct client_info *next;
 };
 
+// return connection time of the targeted nickname; otherwise 0
+time_t get_time(struct client_info *clients, char *target){
+	struct client_info *cursor = clients;
+	while (cursor != NULL) {
+		if (strcmp(cursor->nickname, target) == 0) {
+			return cursor->connection_time;
+		}
+		cursor = cursor->next;
+	}
+	return 0;
+}
 
 // Add the nicknames of clients into list
 void nickname_list(struct client_info *clients, char *list, size_t max_size) {
@@ -102,6 +115,7 @@ int client_list_add(struct client_info **clients, int fd, const struct sockaddr_
 	memset(client->nickname, 0, sizeof(client->nickname));
 	client->address = *address;
 	// Mettre le nouveau client au début de la liste chaînée
+	client->connection_time = time(NULL);
 	client->next = *clients;
 	*clients = client;
 	return 0;

@@ -13,6 +13,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <time.h>
 
 #define MAX_CLIENTS 128
 #define NI_MAXHOST 1025
@@ -138,6 +139,16 @@ int handle_client_message(struct client_info *clients, int client_fd) {
 				strcpy(payload, "Online users are\n");
 				nickname_list(clients, payload, MAX_PAYLOAD_SIZE);
 				message.pld_len = strlen(payload);
+				break;
+			case NICKNAME_INFOS:
+				strcpy(payload, message.infos);
+				strcat(payload, " connected since ");
+				time_t t = get_time(clients, message.infos);
+				struct tm *date = localtime(&t);
+				char connection_time[64];
+				strftime(connection_time, 64, "%Y/%m/%d@%H:%M", date);
+				strcat(payload, connection_time);
+				message.pld_len= strlen(payload);
 				break;
 			default:
 				return 0;
