@@ -137,7 +137,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname) {
 	}
 
 	if (strncmp(msg_line, "/whois ", 7) == 0) {
-		pseudo_target = msg_line + 6; // To get the pseudo targeted
+		pseudo_target = msg_line + 7; // To get the pseudo targeted
 
 		if (valid_nickname(pseudo_target, NICK_LEN - 1) == 0) {
 			fprintf(stderr, "%s: Invalid nickname\n", msg_type_str[NICKNAME_INFOS]);

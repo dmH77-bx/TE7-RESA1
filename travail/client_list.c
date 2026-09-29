@@ -4,8 +4,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <sys/socket.h>
+#include <netdb.h>
 
 #define NICK_LEN 128
+#define NI_MAXHOST 1025
+#define NI_MAXSERV 32
 
 struct client_info {
 	int fd;
@@ -14,6 +18,16 @@ struct client_info {
 	time_t connection_time;
 	struct client_info *next;
 };
+
+void get_address_and_port(struct client_info *clients, char *target, char *address, char *port){
+	struct client_info *cursor = clients;
+	while (cursor != NULL) {
+		if (strcmp(cursor->nickname, target) == 0) {
+			getnameinfo(&(cursor->address), sizeof(cursor->address), address, sizeof(address), port, sizeof(port), NI_NUMERICHOST | NI_NUMERICSERV);
+		}
+		cursor = cursor->next;
+	}
+}
 
 // return connection time of the targeted nickname; otherwise 0
 time_t get_time(struct client_info *clients, char *target){

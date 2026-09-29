@@ -5,6 +5,7 @@
 
 struct client_info;
 
+void get_address_and_port(struct client_info *clients, char *target, char *address, char *port);
 time_t get_time(struct client_info *clients, char *target);
 void nickname_list(struct client_info *clients, char *list, size_t max_size);
 void get_nickname(struct client_info *clients, int fd, char *dest);

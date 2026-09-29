@@ -148,6 +148,14 @@ int handle_client_message(struct client_info *clients, int client_fd) {
 				char connection_time[64];
 				strftime(connection_time, 64, "%Y/%m/%d@%H:%M", date);
 				strcat(payload, connection_time);
+				strcat(payload, " with IP address ");
+				char address[NI_MAXHOST];
+				char port[NI_MAXSERV];
+				get_address_and_port(clients, message.infos, address, port);
+				strcat(payload, address);
+				strcat(payload, " and port number ");
+				strcat(payload, port);
+				strcat(payload, "\n");
 				message.pld_len= strlen(payload);
 				break;
 			default:
