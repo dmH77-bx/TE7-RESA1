@@ -19,7 +19,7 @@ struct client_info {
 };
 
 
-// Returns fd if nickname exists, -1 if not
+// Return fd if nickname exists; -1 if not
 int get_fd_from_nick(struct client_info *clients, char *nick ) {
         struct client_info *cursor = clients;
         int fd;

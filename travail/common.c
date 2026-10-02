@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <sys/socket.h>
 
 
 void die(int val, char *msg) {
@@ -22,7 +23,10 @@ int read_from_socket(int fd, void *buf, size_t msg_size) {
 
 	while (total < msg_size) {
 		ssize_t n = read(fd, cursor + total, msg_size - total);
-		die((int)n, "read");
+		if (n < 0) {
+			perror("read");
+			return 0;
+		}
 		if (n == 0) {
 			return 0;
 		}
@@ -36,8 +40,11 @@ int write_in_socket(int fd, void *buf, size_t msg_size) {
 	char *cursor = buf;
 
 	while (total < msg_size) {
-		ssize_t n = write(fd, cursor + total, msg_size - total);
-		die((int)n, "write");
+		ssize_t n = send(fd, cursor + total, msg_size - total, MSG_NOSIGNAL);
+		if (n < 0) {
+			perror("send");
+			return 0;
+		}
 		if (n == 0) {
 			return 0;
 		}
@@ -49,7 +56,7 @@ int write_in_socket(int fd, void *buf, size_t msg_size) {
 int send_structure_and_payload(int fd, struct message *message, char *payload) {
 	int ret;
 	int pld_len = message->pld_len;
-	if ((pld_len < 0) || (pld_len > 0 && payload == NULL)) {
+	if (pld_len < 0 || pld_len > PROTO_MAX_PAYLOAD || (pld_len > 0 && payload == NULL)) {
 		return 0;
 	}
 	ret = write_in_socket(fd, message, sizeof(*message));
@@ -62,7 +69,6 @@ int send_structure_and_payload(int fd, struct message *message, char *payload) {
 			return 0;
 		}
 	}
-
 	return 1;
 }
 

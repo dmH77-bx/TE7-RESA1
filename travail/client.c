@@ -15,7 +15,7 @@
 
 #define NI_MAXHOST 1025
 #define NI_MAXSERV 32
-#define MAX_LINE_SIZE 4324
+#define MAX_LINE_SIZE (PROTO_MAX_PAYLOAD + 200)
 
 
 int setup_connection(const char *server_ip, const char *server_port) {
@@ -63,9 +63,9 @@ int setup_connection(const char *server_ip, const char *server_port) {
 // Return 1 to keep running, or 0 if the server disconnects or sends an invalid message
 int read_server_message(int socket_fd, char *my_nickname) {
 	struct message message;
-	char payload[MAX_PAYLOAD_SIZE + 1];
+	char payload[PROTO_MAX_PAYLOAD + 1];
 
-	if (receive_structure_and_payload(socket_fd, &message, payload, MAX_PAYLOAD_SIZE) == 0) {
+	if (receive_structure_and_payload(socket_fd, &message, payload, PROTO_MAX_PAYLOAD) == 0) {
 		return 0;
 	}
 
@@ -162,7 +162,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname) {
 		message_broad = msg_line + 8;
 		message.type = BROADCAST_SEND;
 		payload = message_broad;
-		if (strlen(payload) > MAX_PAYLOAD_SIZE) {
+		if (strlen(payload) > PROTO_MAX_PAYLOAD) {
             fprintf(stderr, "Payload too long\n");
             return 1; 
         }
@@ -174,7 +174,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname) {
 		message_unicast = msg_line + 5;
 		message.type = UNICAST_SEND;
 		payload = message_unicast;
-		if (strlen(payload) > MAX_PAYLOAD_SIZE) {
+		if (strlen(payload) > PROTO_MAX_PAYLOAD) {
             fprintf(stderr, "Payload too long\n");
             return 1; 
         }
@@ -187,7 +187,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname) {
 	}
 
 	payload = msg_line;
-	if (strlen(payload) > MAX_PAYLOAD_SIZE) {
+	if (strlen(payload) > PROTO_MAX_PAYLOAD) {
 		fprintf(stderr, "Payload too long: %d\n", (int)strlen(payload));
 		return 1; // To refuse the message but keep the client connected
 	}

@@ -97,9 +97,9 @@ void accept_and_insert_client(int listen_fd, struct pollfd poll_fds[MAX_CLIENTS]
 // Return 1 when the client should be disconnected, 0 otherwise
 int handle_client_message(struct client_info *clients, int client_fd) {
 	struct message message;
-	char payload[MAX_PAYLOAD_SIZE + 1];
+	char payload[PROTO_MAX_PAYLOAD + 1];
 
-	if (receive_structure_and_payload(client_fd, &message, payload, MAX_PAYLOAD_SIZE) == 0) {
+	if (receive_structure_and_payload(client_fd, &message, payload, PROTO_MAX_PAYLOAD) == 0) {
 		return 1;
 	}
 
@@ -137,13 +137,18 @@ int handle_client_message(struct client_info *clients, int client_fd) {
 				break;
 			case NICKNAME_LIST:
 				strcpy(payload, "Online users are\n");
-				nickname_list(clients, payload, MAX_PAYLOAD_SIZE);
+				nickname_list(clients, payload, PROTO_MAX_PAYLOAD);
 				message.pld_len = strlen(payload);
 				break;
 			case NICKNAME_INFOS:
 				strcpy(payload, message.infos);
 				strcat(payload, " connected since ");
 				time_t t = get_time(clients, message.infos);
+				if (t == 0) {
+					strcpy(payload, "User not found\n");
+					message.pld_len = strlen(payload);
+					break;
+				}
 				struct tm *date = localtime(&t);
 				char connection_time[64];
 				strftime(connection_time, 64, "%Y/%m/%d@%H:%M", date);

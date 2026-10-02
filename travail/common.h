@@ -2,7 +2,7 @@
 #define JALON1_COMMON_H
 
 #include <stddef.h>
-#define MAX_PAYLOAD_SIZE 4096
+#define PROTO_MAX_PAYLOAD 65536
 
 struct message;
 
