@@ -19,6 +19,20 @@ struct client_info {
 };
 
 
+// Returns fd if nickname exists, -1 if not
+int get_fd_from_nick(struct client_info *clients, char *nick ) {
+        struct client_info *cursor = clients;
+        int fd;
+        while (cursor != NULL) {
+                if (strcmp(cursor->nickname, nick) == 0) {
+                        fd = cursor->fd;
+                        return fd;
+                }
+                cursor = cursor->next;
+        }
+        return -1;
+}
+
 // Add the fds of clients into list excluding that of the sender and return the number of fds found
 int fd_list_without_sender(struct client_info *clients, int fd, int *list_fd, int max_size) {
 	struct client_info *cursor = clients;

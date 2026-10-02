@@ -5,7 +5,7 @@
 
 struct client_info;
 
-
+int get_fd_from_nick(struct client_info *clients, char *nick );
 int fd_list_without_sender(struct client_info *clients, int fd, int *list_fd, int max_size);
 void get_address_and_port(struct client_info *clients, char *target, char *address, size_t address_len, char *port, size_t port_len);
 time_t get_time(struct client_info *clients, char *target);

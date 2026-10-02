@@ -86,6 +86,9 @@ int read_server_message(int socket_fd, char *my_nickname) {
 		case BROADCAST_SEND:
 			fprintf(stdout, "%s\n", payload);
 			break;
+		case UNICAST_SEND:
+			fprintf(stdout, "%s\n", payload);
+			break;
 		default:
 			fprintf(stderr, "Invalid message type: %s\n", msg_type_str[message.type]);
 			break;
@@ -103,6 +106,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname) {
 	char *pseudo;
 	char *pseudo_target;
 	char *message_broad;
+	char *message_unicast;
 
 	bytes_read = read(STDIN_FILENO, msg_line, MAX_LINE_SIZE);
 	die((int)bytes_read, "read stdin");
@@ -158,6 +162,18 @@ int get_and_send_user_message(int socket_fd, char *my_nickname) {
 		message_broad = msg_line + 8;
 		message.type = BROADCAST_SEND;
 		payload = message_broad;
+		if (strlen(payload) > MAX_PAYLOAD_SIZE) {
+            fprintf(stderr, "Payload too long\n");
+            return 1; 
+        }
+        message.pld_len = (int)strlen(payload);
+		return send_structure_and_payload(socket_fd, &message, payload);
+	}
+
+	if (strncmp(msg_line, "/msg ", 5) == 0) {
+		message_unicast = msg_line + 5;
+		message.type = UNICAST_SEND;
+		payload = message_unicast;
 		if (strlen(payload) > MAX_PAYLOAD_SIZE) {
             fprintf(stderr, "Payload too long\n");
             return 1; 
