@@ -29,7 +29,7 @@ int setup_connection(const char *server_ip, const char *server_port) {
 	hints.ai_socktype = SOCK_STREAM;
 	int error = getaddrinfo(server_ip, server_port, &hints, &result); // This function creates a linked list
 	if (error != 0) {
-		perror("getaddrinfo()");
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(error));
 		exit(EXIT_FAILURE);
 	}
 
@@ -116,6 +116,53 @@ int read_server_message(int socket_fd, char *my_nickname, char *sender_nickname,
 			strcpy(sender_nickname,  message.nick_sender);
 			strcpy(filename, payload);
 			fprintf(stdout, "%s wants you to accept the transfer of the file named %s. Do you accept? [Y/N]\n", message.nick_sender, payload);
+			break;
+		case FILE_ACCEPT: {
+			fprintf(stdout, "%s accepted file transfer.\n", message.nick_sender);
+			fprintf(stdout, "Connecting to %s and sending the file...\n", message.nick_sender);
+			struct addrinfo hints, *result, *rp;
+			int peer_fd;
+			char *port_dest;
+			char *separator = strrchr(payload, ':');
+			if (separator == NULL) {
+				fprintf(stderr, "Invalid local address\n");
+				return 1;
+			}
+			*separator = '\0';
+			port_dest = separator + 1;
+
+			memset(&hints, 0, sizeof(struct addrinfo));
+			hints.ai_family = AF_UNSPEC;
+			hints.ai_socktype = SOCK_STREAM;
+			int error = getaddrinfo(payload, port_dest, &hints, &result);
+			if (error != 0) {
+				fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(error)); 
+				return 1;
+			}
+
+			for (rp = result; rp != NULL; rp = rp->ai_next) {
+				peer_fd = socket(rp->ai_family, rp->ai_socktype,rp->ai_protocol);
+				if (peer_fd == -1) {
+					continue;
+				}
+				if (connect(peer_fd, rp->ai_addr, rp->ai_addrlen) != -1) {
+					break;
+				}
+				close(peer_fd);
+			}
+			if (rp == NULL) {
+				fprintf(stderr, "Could not connect\n");
+				freeaddrinfo(result);
+				return 1;
+			}
+			freeaddrinfo(result);
+			break; }
+		case FILE_REJECT:
+			if (message.nick_sender[0] == '\0') {
+				fprintf(stdout, "[Server] : %s\n", payload);
+				break;
+			}
+			fprintf(stdout, "%s rejected file transfer.\n", message.nick_sender);
 			break;
 		default:
 			fprintf(stderr, "Invalid message type: %s\n", msg_type_str[message.type]);
@@ -324,6 +371,13 @@ int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nic
 		return 1;
 	}
 
+	if ((strcmp(msg_line, "N") == 0) && (strcmp(sender_nickname, "") != 0)) {
+		int ret;
+		ret = reject_transfer(socket_fd, my_nickname, sender_nickname);
+		strcpy(sender_nickname, "");
+		strcpy(filename, "");
+		return ret;
+	}
 
 	if (strcmp(msg_line, "/quit") == 0) {
 		return 0;

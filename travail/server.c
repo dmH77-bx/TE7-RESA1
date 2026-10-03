@@ -31,7 +31,7 @@ int setup_listening_socket(const char *port) {
 	hints.ai_flags = AI_PASSIVE; // To listen on all interfaces
 	int error = getaddrinfo(NULL, port, &hints, &result);
 	if (error != 0) {
-		perror("getaddrinfo()");
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(error));
 		exit(EXIT_FAILURE);
 	}
 	for (rp = result; rp != NULL; rp = rp->ai_next) {
@@ -196,8 +196,34 @@ int handle_client_message(struct client_info *clients, int client_fd) {
 				}
 				send_structure_and_payload(fd, &message, payload);
 				break; }
-			case FILE_ACCEPT:
-
+			case FILE_ACCEPT: {
+				int fd = get_fd_from_nick(clients, message.infos);
+				if (fd == -1) {
+					message.type = UNICAST_SEND;
+					message.nick_sender[0] = '\0';
+					strcpy(payload, "User not found");
+					message.pld_len = strlen(payload);
+					if (send_structure_and_payload(client_fd, &message, payload) == 0) {
+						return 1;
+					}
+					break;
+				}
+				send_structure_and_payload(fd, &message, payload);
+				break; }
+			case FILE_REJECT: {
+				int fd = get_fd_from_nick(clients, message.infos);
+				if (fd == -1) {
+					message.type = UNICAST_SEND;
+					message.nick_sender[0] = '\0';
+					strcpy(payload, "User not found");
+					message.pld_len = strlen(payload);
+					if (send_structure_and_payload(client_fd, &message, payload) == 0) {
+						return 1;
+					}
+					break;
+				}
+				send_structure_and_payload(fd, &message, payload);
+				break; }
 			default:
 				return 0;
 		}
@@ -205,7 +231,8 @@ int handle_client_message(struct client_info *clients, int client_fd) {
 	if (message.type == NICKNAME_NEW) {
 		get_nickname(clients, client_fd, message.nick_sender);
 	}
-	if (message.type != BROADCAST_SEND && message.type != UNICAST_SEND && message.type != FILE_REQUEST){
+	if (message.type != BROADCAST_SEND && message.type != UNICAST_SEND 
+		&& message.type != FILE_REQUEST && message.type != FILE_ACCEPT && message.type != FILE_REJECT) {
 		if (send_structure_and_payload(client_fd, &message, payload) == 0) {
 			return 1;
 		}
