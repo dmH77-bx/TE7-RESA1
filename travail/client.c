@@ -12,11 +12,12 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #define NI_MAXHOST 1025
 #define NI_MAXSERV 32
 #define MAX_LINE_SIZE (PROTO_MAX_PAYLOAD + 200)
-
+#define FILEPATH_LEN 4096
 
 int setup_connection(const char *server_ip, const char *server_port) {
 	struct addrinfo hints, *result, *rp;
@@ -70,7 +71,7 @@ int reject_transfer(int socket_fd, char *my_nickname, char *sender_nickname) {
 }
 
 // Return 1 to keep running, or 0 if the server disconnects or sends an invalid message
-int read_server_message(int socket_fd, char *my_nickname, char *sender_nickname, char *filename) {
+int read_server_message(int socket_fd, char *my_nickname, char *sender_nickname, char *filename, char *filepath_to_send) {
 	struct message message;
 	char payload[PROTO_MAX_PAYLOAD + 1];
 
@@ -115,7 +116,7 @@ int read_server_message(int socket_fd, char *my_nickname, char *sender_nickname,
 			}
 			strcpy(sender_nickname,  message.nick_sender);
 			strcpy(filename, payload);
-			fprintf(stdout, "%s wants you to accept the transfer of the file named %s. Do you accept? [Y/N]\n", message.nick_sender, payload);
+			fprintf(stdout, "%s wants you to accept the transfer of the file named \"%s\". Do you accept? [Y/N]\n", message.nick_sender, payload);
 			break;
 		case FILE_ACCEPT: {
 			fprintf(stdout, "%s accepted file transfer.\n", message.nick_sender);
@@ -173,7 +174,7 @@ int read_server_message(int socket_fd, char *my_nickname, char *sender_nickname,
 
 
 // Return 1 to keep running, or 0 when stdin closes or the user quits
-int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nickname, char *filename) {
+int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nickname, char *filename, char *filepath_to_send) {
 	struct message message = {0};
 	char *payload;
 	ssize_t bytes_read;
@@ -182,7 +183,6 @@ int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nic
 	char *pseudo_target;
 	char *message_broad;
 	char *message_unicast;
-	char *nom_fichier;
 
 	bytes_read = read(STDIN_FILENO, msg_line, MAX_LINE_SIZE);
 	die((int)bytes_read, "read stdin");
@@ -275,19 +275,48 @@ int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nic
 	if (strncmp(msg_line, "/send ", 6) == 0) {
 		message.type = FILE_REQUEST;
 		pseudo_target = msg_line + 6;
-		char *espace = strchr(pseudo_target, ' ');
-		if (espace == NULL) {
+		char *space = strchr(pseudo_target, ' ');
+		if (space == NULL) {
 			fprintf(stderr, "Invalid form: /send <pseudo> <filename>\n");
 			return 1;
 		}
-		*espace = '\0';
-		nom_fichier = espace + 1; // cut the string to separate nickname from filename
+		*space = '\0';
+		char *filepath = space + 1; // cut the string to separate nickname from filepath
+		// Remove the double quotes and extract the filename from the whole filepath
+		if (filepath[0] == '"') {
+			filepath++;
+		}
+		char *quote = strrchr(filepath, '"');
+		if (quote != NULL && quote[1] == '\0') {
+			*quote = '\0';
+		}
+		if (filepath[0] == '\0') {
+			fprintf(stderr, "Invalid filepath\n");
+			return 1;
+		}
+
+		char *file_basename = filepath;
+		char *slash = strrchr(filepath, '/');
+		if (slash != NULL) {
+			file_basename = slash + 1;
+		}
+		if (file_basename[0] == '\0') {
+			fprintf(stderr, "Invalid filepath\n");
+			return 1;
+		}
 		if (valid_nickname(pseudo_target, NICK_LEN - 1) == 0) {
 			fprintf(stderr, "%s: Invalid nickname\n", msg_type_str[FILE_REQUEST]);
 			return 1;
 		}
+
+		if (strlen(filepath) >= FILEPATH_LEN || strlen(file_basename) >= INFOS_LEN) {
+			fprintf(stderr, "Filepath too long\n");
+			return 1;
+		}
+
+		strcpy(filepath_to_send, filepath); 
 		strcpy(message.infos, pseudo_target);
-		payload = nom_fichier;
+		payload = file_basename;
 		message.pld_len = (int)strlen(payload);
 		return send_structure_and_payload(socket_fd, &message, payload);
 	}
@@ -403,6 +432,7 @@ void client_poll_loop(int socket_fd) {
 	char my_nickname[NICK_LEN] = {0};
 	char sender_nickname[NICK_LEN] = {0};
 	char filename[INFOS_LEN] = {0}; // Limit the filename at INFOS_LEN since for FILE_SEND, infos will contain the filename
+	char filepath_to_send[FILEPATH_LEN] = {0}; 
 	struct pollfd watched[2];
 	int running = 1;
 
@@ -417,11 +447,11 @@ void client_poll_loop(int socket_fd) {
 		die(ready, "poll");
 
 		if ((watched[1].revents & POLLIN) != 0) {
-			running = read_server_message(socket_fd, my_nickname, sender_nickname, filename);
+			running = read_server_message(socket_fd, my_nickname, sender_nickname, filename, filepath_to_send);
 		}
 
 		if (running && (watched[0].revents & POLLIN) != 0) {
-			running = get_and_send_user_message(socket_fd, my_nickname, sender_nickname, filename);
+			running = get_and_send_user_message(socket_fd, my_nickname, sender_nickname, filename, filepath_to_send);
 		}
 
 		if ((watched[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 || (watched[1].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
