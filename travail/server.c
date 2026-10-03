@@ -171,33 +171,33 @@ int handle_client_message(struct client_info *clients, int client_fd) {
 				}
 				break; }
 			case UNICAST_SEND: {
-				int i = 0;
-				while (payload[i] != ' ' && payload[i] != '\0') {
-					i++;
-				}
-
-				if (payload[i] == '\0') {
-					strcpy(payload, "Invalid form: /msg <pseudo> <message>\n");
+				int target_fd = get_fd_from_nick(clients, message.infos);
+				if (target_fd == -1) {
+					message.nick_sender[0] = '\0'; 
+					strcpy(payload, "User not found");
 					message.pld_len = strlen(payload);
-				}
-				else {
-					payload[i] = '\0';
-					char *pseudo_cible = payload;
-					char *message_unicast = payload + i + 1;
-					int target_fd = get_fd_from_nick(clients, pseudo_cible);
-					if (target_fd == -1) {
-						strcpy(payload, "User not found\n");
-						message.pld_len = strlen(payload);
+					if (send_structure_and_payload(client_fd, &message, payload) == 0) {
+						return 1;
 					}
-					else {
-						memmove(payload, message_unicast, strlen(message_unicast) + 1);
-						message.pld_len = strlen(payload);
-						send_structure_and_payload(target_fd, &message, payload);
-						return 0;
-					}
+					break;
 				}
-				break;
-			}
+				send_structure_and_payload(target_fd, &message, payload);
+				break; }
+			case FILE_REQUEST: {
+				int fd = get_fd_from_nick(clients, message.infos);
+				if (fd == -1) {
+					message.nick_sender[0] = '\0';
+					strcpy(payload, "User not found");
+					message.pld_len = strlen(payload);
+					if (send_structure_and_payload(client_fd, &message, payload) == 0) {
+						return 1;
+					}
+					break;
+				}
+				send_structure_and_payload(fd, &message, payload);
+				break; }
+			case FILE_ACCEPT:
+
 			default:
 				return 0;
 		}
@@ -205,7 +205,7 @@ int handle_client_message(struct client_info *clients, int client_fd) {
 	if (message.type == NICKNAME_NEW) {
 		get_nickname(clients, client_fd, message.nick_sender);
 	}
-	if (message.type != BROADCAST_SEND && message.type != UNICAST_SEND){
+	if (message.type != BROADCAST_SEND && message.type != UNICAST_SEND && message.type != FILE_REQUEST){
 		if (send_structure_and_payload(client_fd, &message, payload) == 0) {
 			return 1;
 		}

@@ -60,8 +60,17 @@ int setup_connection(const char *server_ip, const char *server_port) {
 }
 
 
+int reject_transfer(int socket_fd, char *my_nickname, char *sender_nickname) {
+	struct message message = {0};
+	message.type = FILE_REJECT;
+	strcpy(message.nick_sender, my_nickname);
+	strcpy(message.infos, sender_nickname);
+	message.pld_len = 0;
+	return send_structure_and_payload(socket_fd, &message, NULL);
+}
+
 // Return 1 to keep running, or 0 if the server disconnects or sends an invalid message
-int read_server_message(int socket_fd, char *my_nickname) {
+int read_server_message(int socket_fd, char *my_nickname, char *sender_nickname, char *filename) {
 	struct message message;
 	char payload[PROTO_MAX_PAYLOAD + 1];
 
@@ -84,21 +93,40 @@ int read_server_message(int socket_fd, char *my_nickname) {
 			fprintf(stdout, "[Server] : %s", payload);
 			break;
 		case BROADCAST_SEND:
-			fprintf(stdout, "%s\n", payload);
+			fprintf(stdout, "[%s] : %s\n", message.nick_sender, payload);
 			break;
 		case UNICAST_SEND:
-			fprintf(stdout, "%s\n", payload);
+			if (message.nick_sender[0] == '\0') {
+				fprintf(stdout, "[Server] : %s\n", payload);
+				break;
+			}
+			fprintf(stdout, "[%s] : %s\n", message.nick_sender, payload);
+			break;
+		case FILE_REQUEST:
+			if (message.nick_sender[0] == '\0') {
+				fprintf(stdout, "[Server] : %s\n", payload);
+				break;
+			}
+			if (strcmp(sender_nickname, "") != 0) {
+				return reject_transfer(socket_fd, my_nickname, message.nick_sender);
+			}
+			if (strlen(payload) >= INFOS_LEN) {
+				return reject_transfer(socket_fd, my_nickname, message.nick_sender);
+			}
+			strcpy(sender_nickname,  message.nick_sender);
+			strcpy(filename, payload);
+			fprintf(stdout, "%s wants you to accept the transfer of the file named %s. Do you accept? [Y/N]\n", message.nick_sender, payload);
 			break;
 		default:
 			fprintf(stderr, "Invalid message type: %s\n", msg_type_str[message.type]);
 			break;
 	}
-
 	return 1;
 }
 
+
 // Return 1 to keep running, or 0 when stdin closes or the user quits
-int get_and_send_user_message(int socket_fd, char *my_nickname) {
+int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nickname, char *filename) {
 	struct message message = {0};
 	char *payload;
 	ssize_t bytes_read;
@@ -107,6 +135,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname) {
 	char *pseudo_target;
 	char *message_broad;
 	char *message_unicast;
+	char *nom_fichier;
 
 	bytes_read = read(STDIN_FILENO, msg_line, MAX_LINE_SIZE);
 	die((int)bytes_read, "read stdin");
@@ -145,7 +174,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname) {
 	}
 
 	if (strncmp(msg_line, "/whois ", 7) == 0) {
-		pseudo_target = msg_line + 7; // To get the pseudo targeted
+		pseudo_target = msg_line + 7; // To get the targeted pseudo
 
 		if (valid_nickname(pseudo_target, NICK_LEN - 1) == 0) {
 			fprintf(stderr, "%s: Invalid nickname\n", msg_type_str[NICKNAME_INFOS]);
@@ -171,16 +200,130 @@ int get_and_send_user_message(int socket_fd, char *my_nickname) {
 	}
 
 	if (strncmp(msg_line, "/msg ", 5) == 0) {
-		message_unicast = msg_line + 5;
+		pseudo_target = msg_line + 5;
+		char *space = strchr(pseudo_target, ' ');
+		if (space == NULL) {
+			fprintf(stderr, "Invalid form: /msg <pseudo> <message>\n");
+			return 1;
+		}
+		*space = '\0';
+		message_unicast = space + 1;
+
+		if (valid_nickname(pseudo_target, NICK_LEN - 1) == 0) {
+			fprintf(stderr, "%s: Invalid nickname\n", msg_type_str[UNICAST_SEND]);
+			return 1;
+		}
+
 		message.type = UNICAST_SEND;
+		strcpy(message.infos, pseudo_target);
 		payload = message_unicast;
 		if (strlen(payload) > PROTO_MAX_PAYLOAD) {
-            fprintf(stderr, "Payload too long\n");
-            return 1; 
-        }
-        message.pld_len = (int)strlen(payload);
+			fprintf(stderr, "Payload too long\n");
+			return 1;
+		}
+		message.pld_len = (int)strlen(payload);
 		return send_structure_and_payload(socket_fd, &message, payload);
 	}
+
+	if (strncmp(msg_line, "/send ", 6) == 0) {
+		message.type = FILE_REQUEST;
+		pseudo_target = msg_line + 6;
+		char *espace = strchr(pseudo_target, ' ');
+		if (espace == NULL) {
+			fprintf(stderr, "Invalid form: /send <pseudo> <filename>\n");
+			return 1;
+		}
+		*espace = '\0';
+		nom_fichier = espace + 1; // cut the string to separate nickname from filename
+		if (valid_nickname(pseudo_target, NICK_LEN - 1) == 0) {
+			fprintf(stderr, "%s: Invalid nickname\n", msg_type_str[FILE_REQUEST]);
+			return 1;
+		}
+		strcpy(message.infos, pseudo_target);
+		payload = nom_fichier;
+		message.pld_len = (int)strlen(payload);
+		return send_structure_and_payload(socket_fd, &message, payload);
+	}
+
+	if ((strcmp(msg_line, "Y") == 0) && (strcmp(sender_nickname, "") != 0)) {
+		int listen_fd = -1;
+		int ret;
+		struct addrinfo hints, *result, *rp;
+
+		memset(&hints, 0, sizeof(struct addrinfo));
+		hints.ai_family = AF_INET6;
+		hints.ai_socktype = SOCK_STREAM;
+		hints.ai_flags = AI_PASSIVE;
+		int error = getaddrinfo(NULL, "0", &hints, &result);
+		if (error != 0) {
+			fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(error));
+			ret = reject_transfer(socket_fd, my_nickname, sender_nickname);
+			strcpy(sender_nickname, "");
+			return ret;
+		}
+		for (rp = result; rp != NULL; rp = rp->ai_next) {
+			listen_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+			if (listen_fd == -1) {
+				continue;
+			}
+			if (bind(listen_fd, rp->ai_addr, rp->ai_addrlen) == 0) {
+				break;
+			}
+			close(listen_fd);
+		}
+		freeaddrinfo(result);
+		if (rp == NULL) {
+			fprintf(stderr, "Could not bind\n");
+			ret = reject_transfer(socket_fd, my_nickname, sender_nickname);
+			strcpy(sender_nickname, "");
+			return ret;
+		}
+		if (listen(listen_fd, 1) < 0) {
+			perror("listen");
+			close(listen_fd);
+			ret = reject_transfer(socket_fd, my_nickname, sender_nickname);
+			strcpy(sender_nickname, "");
+			return ret;
+		}
+
+		char host[NI_MAXHOST];
+		char port[NI_MAXSERV];
+		struct sockaddr_storage addr;
+		socklen_t len = sizeof(addr);
+		getsockname(listen_fd, (struct sockaddr *)&addr, &len);       // fill addr with the local address (IP and port) the socket is bound to
+		getnameinfo((struct sockaddr *)&addr, len, NULL, 0, port, sizeof(port), NI_NUMERICSERV); // to get the port#
+
+		len = sizeof(addr);
+		getsockname(socket_fd, (struct sockaddr *)&addr, &len);
+		getnameinfo((struct sockaddr *)&addr, len, host, sizeof(host), NULL, 0, NI_NUMERICHOST); // to get the IP@
+
+		char accept_payload[NI_MAXHOST + NI_MAXSERV + 2];
+		strcpy(accept_payload, host);
+		strcat(accept_payload, ":");
+		strcat(accept_payload, port);
+
+		message.type = FILE_ACCEPT;
+		strcpy(message.infos, sender_nickname);
+		message.pld_len = strlen(accept_payload);
+		if (send_structure_and_payload(socket_fd, &message, accept_payload) == 0) {
+			close(listen_fd);
+			return 0;
+		}
+
+		int sender_fd = accept(listen_fd, NULL, NULL);
+		close(listen_fd);
+		if (sender_fd == -1) {
+			perror("accept");
+			strcpy(sender_nickname, "");
+			return 1;
+		}
+
+		// 3) receive the file, send FILE_ACK, close(sender_fd)
+		// 4) empty sender_nickname and filename
+
+		return 1;
+	}
+
 
 	if (strcmp(msg_line, "/quit") == 0) {
 		return 0;
@@ -204,10 +347,12 @@ int get_and_send_user_message(int socket_fd, char *my_nickname) {
 
 void client_poll_loop(int socket_fd) {
 	char my_nickname[NICK_LEN] = {0};
+	char sender_nickname[NICK_LEN] = {0};
+	char filename[INFOS_LEN] = {0}; // Limit the filename at INFOS_LEN since for FILE_SEND, infos will contain the filename
 	struct pollfd watched[2];
 	int running = 1;
 
-	/* Initialize once; poll() fills revents after each call. */
+	// Initialize once; poll() fills revents after each call
 	watched[0].fd = STDIN_FILENO;
 	watched[0].events = POLLIN;
 	watched[1].fd = socket_fd;
@@ -218,11 +363,11 @@ void client_poll_loop(int socket_fd) {
 		die(ready, "poll");
 
 		if ((watched[1].revents & POLLIN) != 0) {
-			running = read_server_message(socket_fd, my_nickname);
+			running = read_server_message(socket_fd, my_nickname, sender_nickname, filename);
 		}
 
 		if (running && (watched[0].revents & POLLIN) != 0) {
-			running = get_and_send_user_message(socket_fd, my_nickname);
+			running = get_and_send_user_message(socket_fd, my_nickname, sender_nickname, filename);
 		}
 
 		if ((watched[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 || (watched[1].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
