@@ -106,6 +106,7 @@ int read_server_message(int socket_fd, char *my_nickname, char *sender_nickname,
 		case FILE_REQUEST:
 			if (message.nick_sender[0] == '\0') {
 				fprintf(stdout, "[Server] : %s\n", payload);
+				strcpy(filepath_to_send, "");
 				break;
 			}
 			if (strcmp(sender_nickname, "") != 0) {
@@ -127,6 +128,7 @@ int read_server_message(int socket_fd, char *my_nickname, char *sender_nickname,
 			char *separator = strrchr(payload, ':');
 			if (separator == NULL) {
 				fprintf(stderr, "Invalid local address\n");
+				strcpy(filepath_to_send, "");
 				return 1;
 			}
 			*separator = '\0';
@@ -137,7 +139,8 @@ int read_server_message(int socket_fd, char *my_nickname, char *sender_nickname,
 			hints.ai_socktype = SOCK_STREAM;
 			int error = getaddrinfo(payload, port_dest, &hints, &result);
 			if (error != 0) {
-				fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(error)); 
+				fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(error));
+				strcpy(filepath_to_send, "");
 				return 1;
 			}
 
@@ -154,9 +157,11 @@ int read_server_message(int socket_fd, char *my_nickname, char *sender_nickname,
 			if (rp == NULL) {
 				fprintf(stderr, "Could not connect\n");
 				freeaddrinfo(result);
+				strcpy(filepath_to_send, "");
 				return 1;
 			}
 			freeaddrinfo(result);
+			strcpy(filepath_to_send, "");
 			break; }
 		case FILE_REJECT:
 			if (message.nick_sender[0] == '\0') {
@@ -164,6 +169,7 @@ int read_server_message(int socket_fd, char *my_nickname, char *sender_nickname,
 				break;
 			}
 			fprintf(stdout, "%s rejected file transfer.\n", message.nick_sender);
+			strcpy(filepath_to_send, "");
 			break;
 		default:
 			fprintf(stderr, "Invalid message type: %s\n", msg_type_str[message.type]);
@@ -335,6 +341,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nic
 			fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(error));
 			ret = reject_transfer(socket_fd, my_nickname, sender_nickname);
 			strcpy(sender_nickname, "");
+			strcpy(filename, "");
 			return ret;
 		}
 		for (rp = result; rp != NULL; rp = rp->ai_next) {
@@ -352,6 +359,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nic
 			fprintf(stderr, "Could not bind\n");
 			ret = reject_transfer(socket_fd, my_nickname, sender_nickname);
 			strcpy(sender_nickname, "");
+			strcpy(filename, "");
 			return ret;
 		}
 		if (listen(listen_fd, 1) < 0) {
@@ -359,6 +367,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nic
 			close(listen_fd);
 			ret = reject_transfer(socket_fd, my_nickname, sender_nickname);
 			strcpy(sender_nickname, "");
+			strcpy(filename, "");
 			return ret;
 		}
 
@@ -391,6 +400,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nic
 		if (sender_fd == -1) {
 			perror("accept");
 			strcpy(sender_nickname, "");
+			strcpy(filename, "");
 			return 1;
 		}
 
