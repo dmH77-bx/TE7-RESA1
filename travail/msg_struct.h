@@ -20,6 +20,7 @@ enum msg_type {
 	FILE_ACCEPT,
 	FILE_REJECT,
 	FILE_SEND,
+	FILE_END, // This new message type is used to notify the receptor that all the chunks of the file have been sent. infos: filename; no payload
 	FILE_ACK
 };
 
@@ -46,6 +47,7 @@ static char* msg_type_str[] = {
 	"FILE_ACCEPT",
 	"FILE_REJECT",
 	"FILE_SEND",
+	"FILE_END",
 	"FILE_ACK"
 };
 

@@ -70,6 +70,66 @@ int reject_transfer(int socket_fd, char *my_nickname, char *sender_nickname) {
 	return send_structure_and_payload(socket_fd, &message, NULL);
 }
 
+
+// Return 1 on success; 0 otherwise
+int send_file(int socket_fd, int file_fd, struct message *message, char *my_nickname, char *filename) {
+	char payload[PROTO_MAX_PAYLOAD];
+	message->type = FILE_SEND;
+	strcpy(message->nick_sender, my_nickname);
+	strcpy(message->infos, filename);
+	int ret_value = read(file_fd, payload, PROTO_MAX_PAYLOAD);
+	
+	while (ret_value != 0) {
+		if (ret_value == -1) {
+			fprintf(stderr, "Error while reading the file\n");
+			return 0;
+		}
+		message->pld_len = ret_value;
+		if (send_structure_and_payload(socket_fd, message, payload) == 0) {
+			fprintf(stderr, "Error while sending the file\n");
+			return 0;
+		}
+		ret_value = read(file_fd, payload, PROTO_MAX_PAYLOAD);
+	}
+
+	message->type = FILE_END;
+	message->pld_len = 0;
+	if (send_structure_and_payload(socket_fd, message, payload) == 0) {
+		fprintf(stderr, "Error while sending the file\n");
+		return 0;
+	}
+	return 1;
+}
+
+// Return 1 on success; 0 otherwise
+int receive_file(int socket_fd, int file_fd, struct message *message) {
+	char payload[PROTO_MAX_PAYLOAD + 1];
+	int ret_value;
+	if (receive_structure_and_payload(socket_fd, message, payload, PROTO_MAX_PAYLOAD) == 0) {
+			fprintf(stderr, "Error while reading the file from the socket\n");
+			return 0;
+		}
+	while (message->type == FILE_SEND) {
+		ret_value = write(file_fd, payload, message->pld_len);
+		if (ret_value == -1 || ret_value < message->pld_len) {
+			fprintf(stderr, "Error while writing in the file\n");
+			return 0;
+		}
+
+		if (receive_structure_and_payload(socket_fd, message, payload, PROTO_MAX_PAYLOAD) == 0) {
+			fprintf(stderr, "Error while reading the file from the socket\n");
+			return 0;
+		}
+	}
+
+	if (message->type != FILE_END) {
+		fprintf(stderr, "Error while receiving the file\n");
+		return 0;
+	}
+
+	return 1;
+}
+
 // Return 1 to keep running, or 0 if the server disconnects or sends an invalid message
 int read_server_message(int socket_fd, char *my_nickname, char *sender_nickname, char *filename, char *filepath_to_send) {
 	struct message message;
@@ -161,7 +221,27 @@ int read_server_message(int socket_fd, char *my_nickname, char *sender_nickname,
 				return 1;
 			}
 			freeaddrinfo(result);
-			strcpy(filepath_to_send, "");
+
+			char *filename = filepath_to_send;
+			char *slash = strrchr(filepath_to_send, '/');
+			if (slash != NULL) {
+				filename = slash + 1;
+			}
+
+			int file_fd = open(filepath_to_send, O_RDONLY);
+			if (file_fd == -1) {
+				fprintf(stderr, "Cannot open file\n");
+				return 1;
+			}
+
+			if (send_file(peer_fd, file_fd, &message, my_nickname, filename) == 0) {
+				fprintf(stderr, "Error while sending file\n");
+				return 1;
+			}
+
+			close(file_fd);
+			// strcpy(filepath_to_send, "");
+			// strcpy(sender_nickname, "");
 			break; }
 		case FILE_REJECT:
 			if (message.nick_sender[0] == '\0') {
@@ -189,6 +269,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nic
 	char *pseudo_target;
 	char *message_broad;
 	char *message_unicast;
+	char *file_basename;
 
 	bytes_read = read(STDIN_FILENO, msg_line, MAX_LINE_SIZE);
 	die((int)bytes_read, "read stdin");
@@ -245,10 +326,10 @@ int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nic
 		message.type = BROADCAST_SEND;
 		payload = message_broad;
 		if (strlen(payload) > PROTO_MAX_PAYLOAD) {
-            fprintf(stderr, "Payload too long\n");
-            return 1; 
-        }
-        message.pld_len = (int)strlen(payload);
+			fprintf(stderr, "Payload too long\n");
+			return 1; 
+		}
+		message.pld_len = (int)strlen(payload);
 		return send_structure_and_payload(socket_fd, &message, payload);
 	}
 
@@ -301,7 +382,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nic
 			return 1;
 		}
 
-		char *file_basename = filepath;
+		file_basename = filepath;
 		char *slash = strrchr(filepath, '/');
 		if (slash != NULL) {
 			file_basename = slash + 1;
@@ -404,7 +485,22 @@ int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nic
 			return 1;
 		}
 
-		// 3) receive the file, send FILE_ACK, close(sender_fd)
+		int file_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
+		if (file_fd == -1) {
+			fprintf(stderr, "Error while creating file\n");
+			return 1;
+		}
+
+		fprintf(stdout, "Receiving the file from %s\n", sender_nickname);
+		if (receive_file(sender_fd, file_fd, &message) == 0) {
+			fprintf(stderr, "Error while receiving the file\n");
+			return 1;
+		}
+
+		close(file_fd);
+		
+		// 3) send FILE_ACK, close(sender_fd)
+		// close(sender_fd);
 		// 4) empty sender_nickname and filename
 
 		return 1;
