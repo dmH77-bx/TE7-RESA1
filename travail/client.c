@@ -101,28 +101,33 @@ int send_file(int socket_fd, int file_fd, struct message *message, char *my_nick
 	return 1;
 }
 
-// Return 1 on success; 0 otherwise
-int receive_file(int socket_fd, int file_fd, struct message *message) {
+// Return 2 when FILE_END is received (transfer finished), 1 when a chunk is written, 0 otherwise
+int receive_file(int socket_fd, int file_fd, struct message *message, char *my_nickname) {
 	char payload[PROTO_MAX_PAYLOAD + 1];
 	int ret_value;
 	if (receive_structure_and_payload(socket_fd, message, payload, PROTO_MAX_PAYLOAD) == 0) {
 			fprintf(stderr, "Error while reading the file from the socket\n");
 			return 0;
 		}
-	while (message->type == FILE_SEND) {
+	
+	if (message->type == FILE_SEND) {
 		ret_value = write(file_fd, payload, message->pld_len);
 		if (ret_value == -1 || ret_value < message->pld_len) {
 			fprintf(stderr, "Error while writing in the file\n");
 			return 0;
 		}
-
-		if (receive_structure_and_payload(socket_fd, message, payload, PROTO_MAX_PAYLOAD) == 0) {
-			fprintf(stderr, "Error while reading the file from the socket\n");
+	}
+	else if (message->type == FILE_END) {
+		message->type = FILE_ACK;
+		strcpy(message->nick_sender, my_nickname);
+		message->pld_len = 0;
+		if (send_structure_and_payload(socket_fd, message, NULL) == 0) {
+			fprintf(stderr, "Error while sending FILE_ACK\n");
 			return 0;
 		}
+		return 2;
 	}
-
-	if (message->type != FILE_END) {
+	else {
 		fprintf(stderr, "Error while receiving the file\n");
 		return 0;
 	}
@@ -231,17 +236,39 @@ int read_server_message(int socket_fd, char *my_nickname, char *sender_nickname,
 			int file_fd = open(filepath_to_send, O_RDONLY);
 			if (file_fd == -1) {
 				fprintf(stderr, "Cannot open file\n");
+				close(peer_fd);
+				strcpy(filepath_to_send, "");
 				return 1;
 			}
 
 			if (send_file(peer_fd, file_fd, &message, my_nickname, filename) == 0) {
 				fprintf(stderr, "Error while sending file\n");
+				close(file_fd);
+				close(peer_fd);
+				strcpy(filepath_to_send, "");
 				return 1;
 			}
 
+			if (receive_structure_and_payload(peer_fd, &message, payload, PROTO_MAX_PAYLOAD) == 0) {
+				fprintf(stderr, "Error while receiving a message\n");
+				close(file_fd);
+				close(peer_fd);
+				strcpy(filepath_to_send, "");
+				return 1;
+			}
+			if (message.type == FILE_ACK) {
+				fprintf(stdout, "%s received the file.\n", message.nick_sender);
+			}
+			else {
+				fprintf(stderr, "Error while receiving the transfer's completion acknowledgement\n");
+				close(file_fd);
+				close(peer_fd);
+				strcpy(filepath_to_send, "");
+				return 1;
+			}
 			close(file_fd);
-			// strcpy(filepath_to_send, "");
-			// strcpy(sender_nickname, "");
+			close(peer_fd);
+			strcpy(filepath_to_send, "");
 			break; }
 		case FILE_REJECT:
 			if (message.nick_sender[0] == '\0') {
@@ -260,7 +287,7 @@ int read_server_message(int socket_fd, char *my_nickname, char *sender_nickname,
 
 
 // Return 1 to keep running, or 0 when stdin closes or the user quits
-int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nickname, char *filename, char *filepath_to_send) {
+int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nickname, char *filename, char *filepath_to_send, int *p_listen_fd) {
 	struct message message = {0};
 	char *payload;
 	ssize_t bytes_read;
@@ -396,6 +423,11 @@ int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nic
 			return 1;
 		}
 
+		if (strcmp(pseudo_target, my_nickname) == 0) {
+			fprintf(stderr, "You cannot send a file to yourself\n");
+			return 1;
+		}
+
 		if (strlen(filepath) >= FILEPATH_LEN || strlen(file_basename) >= INFOS_LEN) {
 			fprintf(stderr, "Filepath too long\n");
 			return 1;
@@ -427,6 +459,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nic
 		}
 		for (rp = result; rp != NULL; rp = rp->ai_next) {
 			listen_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+
 			if (listen_fd == -1) {
 				continue;
 			}
@@ -476,33 +509,7 @@ int get_and_send_user_message(int socket_fd, char *my_nickname, char *sender_nic
 			return 0;
 		}
 
-		int sender_fd = accept(listen_fd, NULL, NULL);
-		close(listen_fd);
-		if (sender_fd == -1) {
-			perror("accept");
-			strcpy(sender_nickname, "");
-			strcpy(filename, "");
-			return 1;
-		}
-
-		int file_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
-		if (file_fd == -1) {
-			fprintf(stderr, "Error while creating file\n");
-			return 1;
-		}
-
-		fprintf(stdout, "Receiving the file from %s\n", sender_nickname);
-		if (receive_file(sender_fd, file_fd, &message) == 0) {
-			fprintf(stderr, "Error while receiving the file\n");
-			return 1;
-		}
-
-		close(file_fd);
-		
-		// 3) send FILE_ACK, close(sender_fd)
-		// close(sender_fd);
-		// 4) empty sender_nickname and filename
-
+		*p_listen_fd = listen_fd;
 		return 1;
 	}
 
@@ -539,17 +546,21 @@ void client_poll_loop(int socket_fd) {
 	char sender_nickname[NICK_LEN] = {0};
 	char filename[INFOS_LEN] = {0}; // Limit the filename at INFOS_LEN since for FILE_SEND, infos will contain the filename
 	char filepath_to_send[FILEPATH_LEN] = {0}; 
-	struct pollfd watched[2];
+	struct pollfd watched[4];
 	int running = 1;
-
+	int file_fd = -1;
 	// Initialize once; poll() fills revents after each call
 	watched[0].fd = STDIN_FILENO;
 	watched[0].events = POLLIN;
 	watched[1].fd = socket_fd;
 	watched[1].events = POLLIN;
+	watched[2].fd = -1; // listen_fd
+	watched[2].events = POLLIN;
+	watched[3].fd = -1; // sender_fd
+	watched[3].events = POLLIN;
 
 	while (running) {
-		int ready = poll(watched, 2, -1);
+		int ready = poll(watched, 4, -1);
 		die(ready, "poll");
 
 		if ((watched[1].revents & POLLIN) != 0) {
@@ -557,13 +568,56 @@ void client_poll_loop(int socket_fd) {
 		}
 
 		if (running && (watched[0].revents & POLLIN) != 0) {
-			running = get_and_send_user_message(socket_fd, my_nickname, sender_nickname, filename, filepath_to_send);
+			running = get_and_send_user_message(socket_fd, my_nickname, sender_nickname, filename, filepath_to_send, &watched[2].fd);
+		}
+
+		if (running && watched[2].fd != -1 && (watched[2].revents & POLLIN) != 0) {
+			watched[3].fd = accept(watched[2].fd, NULL, NULL);
+			close(watched[2].fd);
+			watched[2].fd = -1;
+			if (watched[3].fd == -1) {
+				perror("accept");
+				strcpy(sender_nickname, "");
+				strcpy(filename, "");
+			}
+			else {
+				file_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
+				if (file_fd == -1) {
+					fprintf(stderr, "Error while creating file\n");
+					close(watched[3].fd);
+					watched[3].fd = -1;
+					strcpy(filename, "");
+					strcpy(sender_nickname, "");
+				}
+			}
+		}
+
+		if (running && watched[3].fd != -1 && (watched[3].revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
+			struct message message;
+			int ret = receive_file(watched[3].fd, file_fd, &message, my_nickname);
+			if (ret == 0) {
+				fprintf(stderr, "Error while receiving the file\n");
+			}
+			else if (ret == 2) {
+				fprintf(stdout, "File received\n");
+			}
+			if (ret != 1) {
+				close(file_fd);
+				file_fd = -1;
+				close(watched[3].fd);
+				watched[3].fd = -1;
+				strcpy(sender_nickname, "");
+				strcpy(filename, "");
+			}
 		}
 
 		if ((watched[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 || (watched[1].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
 			running = 0;
 		}
 	}
+	close(file_fd);
+	close(watched[3].fd);
+	close(watched[2].fd);
 }
 
 int main(int argc, char **argv) {
